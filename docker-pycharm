@@ -1,0 +1,121 @@
+#!/bin/bash
+
+set -e
+
+PYTHON_VERSION=3
+
+function build_image {
+  tmpdir=$(mktemp -d)
+  (
+    cd $tmpdir
+
+    cat <<EOF > Dockerfile
+FROM python:$PYTHON_VERSION
+
+ARG PYCHARM_VERSION=2020.3
+ARG PYCHARM_BUILD=2020.3.3
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+  gcc git openssh-client less curl \
+  libxtst-dev libxext-dev libxrender-dev libfreetype6-dev \
+  libfontconfig1 libgtk2.0-0 libxslt1.1 libxxf86vm1 \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd -ms /bin/bash developer --uid "1000"
+
+ARG pycharm_source=https://download.jetbrains.com/python/pycharm-community-\${PYCHARM_BUILD}.tar.gz
+ARG pycharm_local_dir=PyCharmCE\${PYCHARM_VERSION}
+
+WORKDIR /opt/pycharm
+
+RUN curl -fsSL \$pycharm_source -o /opt/pycharm/installer.tgz \
+  && tar --strip-components=1 -xzf installer.tgz \
+  && rm installer.tgz
+
+USER developer
+
+RUN mkdir -p /home/developer/.PyCharm \
+  && mkdir -p /home/developer/.config/JetBrains/PyCharm \
+  && mkdir -p /home/developer/.local/share/JetBrains \
+  && mkdir -p /home/developer/.local/bin \
+  && ln -sf /home/developer/.PyCharm /home/developer/.\$pycharm_local_dir \
+  && ln -sf /home/developer/.config/JetBrains/PyCharm /home/developer/.config/JetBrains/\$pycharm_local_dir
+
+ENV PATH="/home/developer/.local/bin:\$PATH"
+
+CMD [ "/opt/pycharm/bin/pycharm.sh" ]
+
+EOF
+
+    docker build . -t docker-pycharm >/dev/null
+  )
+  rm -rf $tmpdir
+}
+
+function usage {
+  SCRIPT_FILE=$(basename $BASH_SOURCE)
+  echo -e "Usage:
+
+$SCRIPT_FILE [OPTIONS] [FOLDER]
+
+options:
+    -h,  --help                   : Print usage
+    -pv, --python-version version : Specifies base python docker image version (defaults to 3)
+    -p,  --publish list           : Passed to docker run to expose ports
+
+folder:
+    which folder will be mounted (defaults to current folder if not specified)"
+}
+
+POSITIONAL=()
+EXPOSE_PORTS=()
+while [[ $# -gt 0 ]]
+do
+key="$1"
+
+case $key in
+    -pv|--python-version)
+    PYTHON_VERSION="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    -p|--publish)
+    EXPOSE_PORTS+=("$1 $2")
+    shift # past argument
+    shift # past value
+    ;;
+    -h|--help)
+    usage
+    exit 1
+    ;;
+    *)    # unknown option
+    POSITIONAL+=("$1") # save it in an array for later
+    shift # past argument
+    ;;
+esac
+done
+set -- "${POSITIONAL[@]}" # restore positional parameters
+
+echo "Python Version: $PYTHON_VERSION"
+
+build_image
+
+if [ -z "$1" ]; then
+  DIR="$PWD"
+else
+  DIR="$(realpath $1)"
+  shift # past argument
+fi
+
+mkdir -p ~/.docker-pycharm/{.PyCharm,.java,.config,.local}
+
+docker run --rm -it \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v "$HOME/.docker-pycharm/.PyCharm":/home/developer/.PyCharm \
+  -v "$HOME/.docker-pycharm/.java":/home/developer/.java \
+  -v "$HOME/.docker-pycharm/.config":/home/developer/.config/JetBrains/PyCharm \
+  -v "$HOME/.docker-pycharm/.local":/home/developer/.local \
+  -v $DIR:/home/developer/projects \
+  --name pycharm-$(basename $DIR) \
+  ${EXPOSE_PORTS[@]} \
+  docker-pycharm
