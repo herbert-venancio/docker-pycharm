@@ -60,14 +60,18 @@ $SCRIPT_FILE [OPTIONS] [FOLDER]
 options:
     -h,  --help                   : Print usage
     -pv, --python-version version : Specifies base python docker image version (defaults to 3)
-    -p,  --publish list           : Passed to docker run to expose ports
+    -e,  --env list               : Passed to docker run to set environment variables
+         --name string            : Passed to docker run to assign a name to the container
+         --network network        : Passed to docker run to connect a container to a network
+    -p,  --publish list           : Passed to docker run to publish a container's port(s) to the host
+    -v,  --volume list            : Passed to docker run to bind mount a volume
 
 folder:
     which folder will be mounted (defaults to current folder if not specified)"
 }
 
 POSITIONAL=()
-EXPOSE_PORTS=()
+DOCKER_ARGS=()
 while [[ $# -gt 0 ]]
 do
 key="$1"
@@ -78,8 +82,8 @@ case $key in
     shift # past argument
     shift # past value
     ;;
-    -p|--publish)
-    EXPOSE_PORTS+=("$1 $2")
+    -e|--env|--name|--network|-p|--publish|-v|--volume)
+    DOCKER_ARGS+=("$1 $2")
     shift # past argument
     shift # past value
     ;;
@@ -117,5 +121,5 @@ docker run --rm -it \
   -v "$HOME/.docker-pycharm/.local":/home/developer/.local \
   -v $DIR:/home/developer/projects \
   --name pycharm-$(basename $DIR) \
-  ${EXPOSE_PORTS[@]} \
+  ${DOCKER_ARGS[@]} \
   docker-pycharm
